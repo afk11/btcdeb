@@ -17,9 +17,26 @@ struct CodePath {
     std::vector<bool> active;
     std::vector<size_t> anti_indices;
     size_t path_index;
-    bool is_active() { return active.size() == 0 || active.back(); }
-    void swap_active() { if (!active.size()) active.push_back(true); active[active.size()-1] = !active[active.size()-1]; }
-    void pop_active() { if (!active.size()) { fprintf(stderr, "error: ELSE without IF\n"); exit(1); } active.pop_back(); }
+    bool is_active() {
+        bool isActive = active.size() == 0 || active.back() != 0;
+        return isActive;
+    }
+    void swap_active() {
+        fprintf(stdout, "swapactive(%zu)\n", path_index);
+        if (!active.size()) {
+            fprintf(stdout, "-activate first codepath\n");
+            active.push_back(true);
+        }
+        active[active.size() - 1] = !active[active.size() - 1];
+    }
+    void pop_active() {
+        fprintf(stdout, "active.size: %zu popactive()\n", active.size());
+        if (!active.size()) {
+            fprintf(stderr, "error: ELSE without IF\n");
+            exit(1);
+        }
+        active.pop_back();
+    }
     CodePath(CScript script_in = CScript(), size_t params_in = 0, size_t stack_size_in = 0, std::vector<bool> active_in = std::vector<bool>())
     : script(script_in)
     , params(params_in)
@@ -74,14 +91,23 @@ std::string repeat(const char* v, size_t count, std::string separator = " ") {
     }
     return res;
 }
-
+void debug_codepath(CodePath& codePath) {
+    fprintf(stdout, "CodePath(\nscript:%s)\n", codePath.script);
+}
 void split_codepaths(std::vector<CodePath>& paths, CScript& left, CScript& right) {
     size_t len = paths.size();
     for (size_t i = 0; i < len; i++) {
         if (paths[i].is_active()) {
+            fprintf(stdout, "splitting codepath %zu into %zu\n", i, paths.size());
             paths.push_back(paths[i].split(left, right, paths.size()));
+            fprintf(stdout, "old codepath:\n");
+            debug_codepath(paths[i]);
+            fprintf(stdout, "new codepath:\n");
+            debug_codepath(paths[paths.size()-1]);
         }
     }
+
+    fprintf(stdout, "before/after split (%zu -> %zu)\n", len, paths.size());
 }
 
 void interpret_opcode(std::vector<CodePath>& paths, opcodetype opcode) {
@@ -100,23 +126,33 @@ void interpret_opcode(std::vector<CodePath>& paths, opcodetype opcode) {
     switch (opcode) {
     case OP_IF:
     case OP_NOTIF: {
+
         int activation = opcode == OP_IF;
+        if (activation) {
+            fprintf(stdout, "interpret.IF\n");
+        } else {
+            fprintf(stdout, "interpret.NOTIF\n");
+        }
+
         CScript scripts[2];
         scripts[1 - activation] << OP_VERIFY;
         scripts[activation] << OP_NOT << OP_VERIFY;
         split_codepaths(paths, scripts[0], scripts[1]);
     } break;
     case OP_ELSE:
+        fprintf(stdout, "interpret.ELSE\n");
         for (auto& path : paths) {
             path.swap_active();
         }
         break;
     case OP_ENDIF:
+        fprintf(stdout, "interpret.ENDIF\n");
         for (auto& path : paths) {
             path.pop_active();
         }
         break;
     default:
+        fprintf(stdout, "interpret.OP\n");
         for (auto& path : paths) {
             if (path.is_active()) {
                 path.script << opcode;
@@ -127,11 +163,13 @@ void interpret_opcode(std::vector<CodePath>& paths, opcodetype opcode) {
 }
 
 void update_path(size_t& idx, std::vector<CodePath>& paths, opcodetype opcode, std::vector<bool> state) {
+    fprintf(stdout, "updatepath\n");
     switch (opcode) {
     case OP_IF:
     case OP_NOTIF: {
         bool passed = state.back();
         if (passed) {
+            fprintf(stdout, " - iterate path index\n");
             // iterate path index
             paths[idx].path_index++;
         } else {
